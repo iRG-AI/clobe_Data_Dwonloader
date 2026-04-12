@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.irichgreen.clobe</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>SCRIPT_DIR_PLACEHOLDER/clobe-server.js</string>
+    <string>--scheduler</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>SCRIPT_DIR_PLACEHOLDER</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>   <integer>6</integer>
+    <key>Minute</key> <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>SCRIPT_DIR_PLACEHOLDER/logs/scheduler.log</string>
+  <key>StandardErrorPath</key>
+  <string>SCRIPT_DIR_PLACEHOLDER/logs/scheduler-err.log</string>
+
+  <key>RunAtLoad</key> <false/>
+  <key>KeepAlive</key> <false/>
+</dict>
+</plist>

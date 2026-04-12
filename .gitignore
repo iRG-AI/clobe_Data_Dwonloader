@@ -1,0 +1,18 @@
+# .gitignore - clobe_Data_Downloader
+# 민감 정보 제외
+clobe-config.json
+
+# 로그 파일
+logs/
+*.log
+
+# Mac OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Node
+node_modules/

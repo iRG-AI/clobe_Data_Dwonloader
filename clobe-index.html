@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clobe.ai 재무 자동 업데이트</title>
+<style>
+:root {
+  --bg:#0d0d14; --bg2:#13131f; --card:#1a1a2e;
+  --border:#2a2a44; --acc:#4f8ef7; --acc2:#00d4aa;
+  --red:#ff4d6d; --yellow:#ffd60a; --green:#30d158;
+  --text:#e8e8f0; --muted:#6b6b8a; --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Apple SD Gothic Neo','Noto Sans KR',sans-serif;min-height:100vh;}
+header{padding:28px 40px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;}
+.logo{width:40px;height:40px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;}
+.hd h1{font-size:18px;font-weight:700;}
+.hd p{font-size:12px;color:var(--muted);margin-top:2px;}
+.badge{margin-left:auto;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;
+  background:rgba(79,142,247,.12);color:var(--acc);border:1px solid rgba(79,142,247,.25);}
+main{max-width:900px;margin:0 auto;padding:32px 24px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;}
+.sec-hd{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
+.sec-ico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+.sec-ico.blue{background:rgba(79,142,247,.15);}
+.sec-ico.green{background:rgba(48,209,88,.12);}
+.sec-ico.yellow{background:rgba(255,214,10,.12);}
+.sec-title{font-size:13px;font-weight:700;letter-spacing:.3px;}
+.sec-sub{font-size:11px;color:var(--muted);margin-top:1px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">💰</div>
+  <div class="hd">
+    <h1>clobe.ai 재무 자동 업데이트</h1>
+    <p>통장내역 · 카드승인 · 카드매입 · 세금계산서 → 재무관리·카드관리 엑셀 자동 갱신</p>
+  </div>
+  <div class="badge" id="statusBadge">● 대기 중</div>
+</header>
+<main>
+
+  <!-- ① 연도 선택 -->
+  <div class="card">
+    <div class="sec-hd">
+      <div class="sec-ico blue">📅</div>
+      <div><div class="sec-title">업데이트 연도 선택</div>
+           <div class="sec-sub">선택한 연도의 데이터만 다운로드·갱신합니다</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--muted);">연도:</span>
+      <div id="yearBtns" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      <input type="number" id="customYear" placeholder="직접입력" min="2020" max="2099"
+        style="width:90px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--bg2);color:var(--text);font-size:13px;text-align:center;outline:none;">
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap;">
+      <button id="runBtn" onclick="startRun()"
+        style="padding:12px 28px;border-radius:10px;border:none;background:var(--acc);color:#fff;
+               font-size:14px;font-weight:700;cursor:pointer;">
+        <span id="btnTxt">▶ 지금 실행</span>
+      </button>
+      <button id="stopBtn" onclick="stopRun()" disabled
+        style="padding:12px 20px;border-radius:10px;border:1px solid var(--border);
+               background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;">
+        ■ 중지
+      </button>
+      <span id="runHint" style="font-size:12px;color:var(--muted);">연도를 선택하고 실행하세요</span>
+    </div>
+  </div>
+
+  <!-- ② 진행 상태 -->
+  <div class="card" id="progressSec" style="display:none;">
+    <div class="sec-hd">
+      <div class="sec-ico green">⚡</div>
+      <div><div class="sec-title" id="progTitle">처리 중...</div>
+           <div class="sec-sub" id="progSub">잠시 기다려주세요</div></div>
+    </div>
+    <div style="background:var(--bg2);border-radius:100px;height:5px;margin:12px 0;">
+      <div id="progBar" style="height:100%;border-radius:100px;
+        background:linear-gradient(90deg,var(--acc),var(--acc2));width:0%;transition:width .4s;"></div>
+    </div>
+    <div id="logBox" style="background:var(--bg2);border-radius:10px;padding:14px 16px;
+      height:340px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.9;"></div>
+    <div id="doneBanner" style="display:none;padding:14px 18px;border-radius:10px;
+      margin-top:16px;font-size:13px;font-weight:600;"></div>
+  </div>
+
+  <!-- ③ 실행 이력 -->
+  <div class="card">
+    <div class="sec-hd">
+      <div class="sec-ico yellow">📋</div>
+      <div><div class="sec-title">실행 이력</div>
+           <div class="sec-sub">최근 실행 로그 목록</div></div>
+    </div>
+    <div id="logHist" style="display:flex;flex-direction:column;gap:6px;">
+      <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px;">실행 이력이 없습니다</div>
+    </div>
+  </div>
+
+  <!-- ④ 설정 요약 -->
+  <div class="card">
+    <div class="sec-hd">
+      <div class="sec-ico blue">⚙️</div>
+      <div><div class="sec-title">설정 정보</div>
+           <div class="sec-sub">clobe-config.json 기준</div></div>
+    </div>
+    <div id="cfgDisplay" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"></div>
+  </div>
+</main>
+
+<style>
+@keyframes spin{to{transform:rotate(360deg);}}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;
+  border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px;}
+.yr-btn{padding:8px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;
+  color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;}
+.yr-btn.active{background:rgba(79,142,247,.15);border-color:var(--acc);color:var(--acc);}
+.log-ok{color:#30d158;} .log-err{color:#ff4d6d;} .log-info{color:#4f8ef7;} .log-warn{color:#ffd60a;}
+</style>
+
+<script>
+const API = 'http://localhost:3001';
+let evtSource = null;
+let selectedYear = new Date().getFullYear();
+
+function renderYearBtns() {
+  const now = new Date().getFullYear();
+  const btns = document.getElementById('yearBtns');
+  btns.innerHTML = '';
+  for (let y = now; y >= now - 2; y--) {
+    const b = document.createElement('button');
+    b.className = 'yr-btn' + (y === selectedYear ? ' active' : '');
+    b.textContent = y + '년';
+    b.onclick = () => { selectedYear = y; document.querySelectorAll('.yr-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.getElementById('customYear').value=''; document.getElementById('runHint').textContent=`${y}년 데이터를 업데이트합니다`; };
+    btns.appendChild(b);
+  }
+}
+
+document.getElementById('customYear').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (v >= 2020 && v <= 2099) { selectedYear = v; document.querySelectorAll('.yr-btn').forEach(x=>x.classList.remove('active')); document.getElementById('runHint').textContent=`${v}년 데이터를 업데이트합니다`; }
+});
+</script>
+
+<script>
+function addLog(msg) {
+  const box = document.getElementById('logBox');
+  const line = document.createElement('div');
+  const t = new Date().toLocaleTimeString('ko-KR');
+  let cls = '';
+  if (msg.includes('✅')||msg.includes('완료')||msg.includes('저장')) cls='log-ok';
+  else if (msg.includes('❌')||msg.includes('오류')||msg.includes('[ERR]')) cls='log-err';
+  else if (msg.includes('──')||msg.includes('[1/')||msg.includes('[2/')||msg.includes('[3/')||msg.includes('[4/')) cls='log-info';
+  else if (msg.includes('⚠')||msg.includes('백업')) cls='log-warn';
+  line.innerHTML = `<span style="color:var(--muted);font-size:11px;">[${t}]</span> <span class="${cls}">${msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`;
+  box.appendChild(line);
+  requestAnimationFrame(()=>box.scrollTop=box.scrollHeight);
+}
+
+async function startRun() {
+  document.getElementById('runBtn').disabled=true;
+  document.getElementById('stopBtn').disabled=false;
+  document.getElementById('btnTxt').innerHTML='<span class="spinner"></span>실행 중...';
+  document.getElementById('logBox').innerHTML='';
+  document.getElementById('doneBanner').style.display='none';
+  document.getElementById('progressSec').style.display='block';
+  document.getElementById('progTitle').textContent=`${selectedYear}년 데이터 업데이트 중...`;
+  document.getElementById('progBar').style.width='5%';
+  document.getElementById('statusBadge').textContent='● 실행 중';
+  document.getElementById('statusBadge').style.color='#ffd60a';
+  try {
+    const res = await fetch(`${API}/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({year:selectedYear})});
+    const data = await res.json();
+    if (!res.ok) { addLog(`❌ 서버 오류: ${data.error}`); resetBtn(false); return; }
+    if (evtSource) evtSource.close();
+    evtSource = new EventSource(`${API}/logs/stream`);
+    let pv=5;
+    evtSource.onmessage = e => {
+      try {
+        const d=JSON.parse(e.data);
+        if(d.type==='log'){addLog(d.msg);if(['완료','삭제','삽입','저장','백업'].some(k=>d.msg.includes(k))){pv=Math.min(pv+8,95);document.getElementById('progBar').style.width=pv+'%';}}
+        else if(d.type==='done'){document.getElementById('progBar').style.width='100%';evtSource.close();resetBtn(true);loadLogHist();}
+      } catch(e){}
+    };
+    evtSource.onerror=()=>{evtSource.close();resetBtn(false);};
+  } catch(err){addLog(`❌ 서버 연결 실패: ${err.message}`);resetBtn(false);}
+}
+
+async function stopRun() {
+  await fetch(`${API}/stop`,{method:'POST'}).catch(()=>{});
+  if(evtSource){evtSource.close();evtSource=null;}
+  addLog('⏹ 중지 요청됨');resetBtn(false);
+}
+
+function resetBtn(success) {
+  document.getElementById('runBtn').disabled=false;
+  document.getElementById('stopBtn').disabled=true;
+  document.getElementById('btnTxt').textContent='▶ 지금 실행';
+  document.getElementById('statusBadge').textContent='● 대기 중';
+  document.getElementById('statusBadge').style.color='';
+  if(success===true){const b=document.getElementById('doneBanner');b.style.cssText='display:block;padding:14px 18px;border-radius:10px;margin-top:16px;font-size:13px;font-weight:600;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);color:#30d158;';b.textContent=`✅ ${selectedYear}년 업데이트 완료!`;}
+  else if(success===false){const b=document.getElementById('doneBanner');b.style.cssText='display:block;padding:14px 18px;border-radius:10px;margin-top:16px;font-size:13px;font-weight:600;background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);color:#ff4d6d;';b.textContent='❌ 오류 발생 — 로그를 확인하세요';}
+}
+
+async function loadLogHist() {
+  try{const res=await fetch(`${API}/logs`);const files=await res.json();const el=document.getElementById('logHist');if(!files.length){el.innerHTML='<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px;">실행 이력이 없습니다</div>';return;}el.innerHTML=files.map(f=>`<div onclick="viewLog('${f}')" style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:12px;"><span>📄</span><span style="flex:1;font-family:monospace;">${f}</span><span style="color:var(--acc);">보기 →</span></div>`).join('');}catch(e){}
+}
+
+async function viewLog(fname){
+  try{const res=await fetch(`${API}/logs/${fname}`);const text=await res.text();document.getElementById('progressSec').style.display='block';document.getElementById('logBox').innerHTML='';text.split('\n').filter(Boolean).forEach(l=>addLog(l));}catch(e){}
+}
+
+async function loadConfig(){
+  try{const res=await fetch(`${API}/config`);const cfg=await res.json();const el=document.getElementById('cfgDisplay');
+  const rows=[['clobe.ai ID',cfg.clobe?.id||'-'],['비밀번호','***'],['재무관리 폴더',(cfg.paths?.finance_dir||'-').split('/').pop()],['다운로드 폴더',(cfg.paths?.download_dir||'-').split('/').pop()],['텔레그램 알림',cfg.telegram?.enabled?'✅ 활성화':'비활성화'],['스케줄 시간',cfg.schedule?.time||'06:00']];
+  el.innerHTML=rows.map(([k,v])=>`<div style="padding:10px 14px;background:var(--bg2);border-radius:8px;font-size:12px;"><div style="color:var(--muted);margin-bottom:3px;font-size:11px;">${k}</div><div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${v}">${v}</div></div>`).join('');}
+  catch(e){document.getElementById('cfgDisplay').innerHTML='<div style="padding:10px 14px;background:var(--bg2);border-radius:8px;font-size:12px;color:#ff4d6d;">서버 미연결 — node clobe-server.js 실행 필요</div>';}
+}
+
+renderYearBtns(); loadLogHist(); loadConfig();
+</script>
+</body>
+</html>
