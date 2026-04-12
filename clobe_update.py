@@ -8,8 +8,12 @@ clobe_update.py — clobe.ai 재무 자동 업데이트
 환경변수: CLOBE_YEAR (없으면 현재 연도)
 """
 
-import json, os, sys, time, glob, shutil, re
+import json, os, sys, time, glob, shutil, re, unicodedata
 from datetime import datetime
+
+def nfc(s):
+    """Mac 파일시스템 NFD → Python NFC 변환"""
+    return unicodedata.normalize('NFC', s)
 from openpyxl import load_workbook
 from openpyxl.worksheet.formula import ArrayFormula
 
@@ -62,17 +66,33 @@ def wait_new(dl_dir, before, keyword, timeout=90):
     raise TimeoutError(f'다운로드 대기 초과 ({timeout}s) [{keyword}]')
 
 def find_latest(directory, keyword):
-    cands = [f for f in glob.glob(os.path.join(directory, f'*{keyword}*.xlsx'))
-             if not os.path.basename(f).startswith('~$')]
+    """os.listdir + NFC 변환으로 한글 파일명 매칭 (Mac NFD 호환)"""
+    try:
+        all_files = os.listdir(directory)
+    except Exception as e:
+        raise FileNotFoundError(f"폴더 접근 실패: {directory} ({e})")
+    keyword_nfc = nfc(keyword)
+    cands = [
+        os.path.join(directory, f)
+        for f in all_files
+        if keyword_nfc in nfc(f) and f.endswith('.xlsx') and not f.startswith('~$')
+    ]
     if not cands:
         raise FileNotFoundError(f"'{keyword}' 파일 없음: {directory}")
     return max(cands, key=os.path.getmtime)
 
 def next_seq(directory, fy_prefix, date_str):
-    """같은 날짜의 가장 높은 V번호 + 1 반환"""
-    pattern  = os.path.join(directory, f'{fy_prefix}*_{date_str}_V*.xlsx')
-    existing = [os.path.basename(f) for f in glob.glob(pattern)
-                if not os.path.basename(f).startswith('~$')]
+    """같은 날짜의 가장 높은 V번호 + 1 반환 (NFC 변환 적용)"""
+    try:
+        all_files = os.listdir(directory)
+    except Exception:
+        return 1
+    prefix_nfc = nfc(fy_prefix)
+    existing = [
+        f for f in all_files
+        if nfc(f).startswith(prefix_nfc) and date_str in f
+        and '_V' in f and f.endswith('.xlsx') and not f.startswith('~$')
+    ]
     if not existing:
         return 1
     nums = [int(m.group(1)) for name in existing
@@ -107,10 +127,8 @@ def build_driver():
     })
     opts.add_argument('--start-maximized')
     opts.add_argument('--disable-blink-features=AutomationControlled')
-    user_data = os.path.expanduser('~/Library/Application Support/Google/Chrome')
-    if os.path.exists(user_data):
-        opts.add_argument(f'--user-data-dir={user_data}')
-        opts.add_argument('--profile-directory=Default')
+    # 기존 Chrome이 실행 중일 때 프로필 충돌 방지 → 새 임시 세션 사용
+    # (로그인이 필요하면 config.json의 id/password로 자동 로그인)
     service = Service(ChromeDriverManager().install())
     driver  = webdriver.Chrome(service=service, options=opts)
     driver.implicitly_wait(10)
@@ -176,20 +194,41 @@ def click_card_tab(driver, tab_name):
 def click_excel_dl(driver, before, keyword, has_submenu=True):
     wait    = WebDriverWait(driver, 15)
     actions = ActionChains(driver)
+
+    # 1) 엑셀 다운로드 버튼 클릭
     btn = wait.until(EC.element_to_be_clickable(
         (By.XPATH, "//button[contains(@class,'ant-dropdown-trigger') and normalize-space(.)='엑셀 다운로드']")))
     btn.click()
-    time.sleep(1)
+    time.sleep(1.5)
+
     if has_submenu:
-        submenus = wait.until(EC.presence_of_all_elements_located(
-            (By.CSS_SELECTOR, 'li.ant-dropdown-menu-submenu')))
-        target = next((s for s in submenus if '분류' not in s.text), submenus[0])
-        actions.move_to_element(target).perform()
-        time.sleep(.8)
-    xlsx_items = wait.until(EC.presence_of_all_elements_located(
-        (By.XPATH,
-         "//li[contains(@class,'ant-dropdown-menu-item') and normalize-space(text())='통합 파일 (xlsx)']")))
-    xlsx_items[0].click()
+        # 2) 서브메뉴('거래내역') hover
+        try:
+            submenus = wait.until(EC.presence_of_all_elements_located(
+                (By.CSS_SELECTOR, 'li.ant-dropdown-menu-submenu')))
+            target = next((s for s in submenus if '분류' not in s.text), submenus[0])
+            actions.move_to_element(target).perform()
+            time.sleep(1.2)
+        except Exception as e:
+            log(f'  서브메뉴 hover 실패(무시): {e}')
+
+    # 3) '통합 파일 (xlsx)' 클릭 — JS 방식으로 폴백
+    try:
+        xlsx_items = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located(
+            (By.XPATH,
+             "//li[contains(@class,'ant-dropdown-menu-item') and normalize-space(text())='통합 파일 (xlsx)']")))
+        xlsx_items[0].click()
+    except Exception:
+        # JS 클릭으로 폴백
+        result = driver.execute_script("""
+            const items = Array.from(document.querySelectorAll('li.ant-dropdown-menu-item'));
+            const target = items.find(el => el.textContent.trim() === '통합 파일 (xlsx)');
+            if (target) { target.click(); return 'ok'; }
+            return 'not_found';
+        """)
+        if result != 'ok':
+            raise Exception("'통합 파일 (xlsx)' 항목을 찾을 수 없습니다")
+
     log('  통합 파일(xlsx) 클릭 -> 대기...')
     path = wait_new(DOWNLOAD_DIR, before, keyword)
     log(f'  다운로드 완료: {os.path.basename(path)}')
@@ -206,12 +245,19 @@ def download_tax_xl(driver, before):
     if items:
         try:
             actions.move_to_element(items[0]).perform()
-            time.sleep(.8)
-            xl = driver.find_elements(By.XPATH,
-                "//li[contains(@class,'ant-dropdown-menu-item') and normalize-space(text())='통합 파일 (xlsx)']")
-            (xl[0] if xl else items[0]).click()
+            time.sleep(1.0)
         except Exception:
             pass
+    # JS 폴백으로 통합 파일 클릭
+    result = driver.execute_script("""
+        const items = Array.from(document.querySelectorAll('li.ant-dropdown-menu-item'));
+        const target = items.find(el => el.textContent.trim() === '통합 파일 (xlsx)');
+        if (target) { target.click(); return 'ok'; }
+        // 첫 번째 항목 클릭 폴백
+        if (items.length > 0) { items[0].click(); return 'fallback'; }
+        return 'not_found';
+    """)
+    log(f'  세금계산서 다운로드 클릭 ({result})')
     return wait_new(DOWNLOAD_DIR, before, PAT_TAX)
 
 # ─── 각 페이지 다운로드 ───
