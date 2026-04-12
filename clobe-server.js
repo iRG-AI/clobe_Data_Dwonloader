@@ -8,6 +8,9 @@ const path  = require('path');
 const { spawn } = require('child_process');
 const PORT = 3001;
 
+// anaconda3 python3 사용 (xlwings 포함)
+const PYTHON3 = '/Users/tycoonan/anaconda3/bin/python3';
+
 const CFG_PATH = path.join(__dirname, 'clobe-config.json');
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CFG_PATH, 'utf8')); }
@@ -90,7 +93,7 @@ const server = http.createServer((req, res) => {
       writeLog(`▶ clobe 업데이트 시작 (${year}년)`);
       const cfg = loadConfig();
       const env = { ...process.env, CLOBE_YEAR: year };
-      runningProc = spawn('python3', [path.join(__dirname, 'clobe_update.py')], { cwd: __dirname, env });
+      runningProc = spawn(PYTHON3, [path.join(__dirname, 'clobe_update.py')], { cwd: __dirname, env });
       runningProc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => writeLog(l)));
       runningProc.stderr.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => writeLog('[ERR] ' + l)));
       runningProc.on('close', code => {
@@ -213,7 +216,7 @@ if (process.argv.includes('--scheduler')) {
   };
   slog('스케줄러 자동 실행 (' + year + '년)');
   const env  = { ...process.env, CLOBE_YEAR: year };
-  const proc = spawn('python3', [path.join(__dirname, 'clobe_update.py')], { cwd: __dirname, env });
+  const proc = spawn(PYTHON3, [path.join(__dirname, 'clobe_update.py')], { cwd: __dirname, env });
   proc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => slog(l)));
   proc.stderr.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => slog('[ERR] ' + l)));
   proc.on('close', code => {

@@ -124,69 +124,95 @@ def load_value_rows(src_path, sheet_index=0):
     clobe xlsx에서 헤더를 제외한 데이터 행만 반환.
     openpyxl read_only + data_only 로 빠르게 읽기.
     """
-    wb   = load_workbook(src_path, data_only=True, read_only=True)
-    ws   = wb.worksheets[sheet_index]
-    rows = [tuple(c.value for c in row) for row in ws.iter_rows(min_row=2)]
-    wb.close()
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb   = load_workbook(src_path, data_only=True, read_only=True)
+        ws   = wb.worksheets[sheet_index]
+        rows = [tuple(c.value for c in row) for row in ws.iter_rows(min_row=2)]
+        wb.close()
     return rows
 
-# ─── xlwings 기반 엑셀 업데이트 (서식 완벽 보존) ───
+# ─── openpyxl 기반 업데이트 (수식 컬럼 보호) ───
 def update_sheet_xlwings(target_path, sheet_name,
                           new_rows, val_col_count,
                           date_col_idx, target_year):
     """
-    xlwings로 Excel을 직접 제어하여 데이터 업데이트.
-    - 서식·수식·차트·Sparkline 등 원본 Excel 기능 완벽 보존
-    - clobe 값 컬럼(val_col_count개)만 쓰고 수식 컬럼은 건드리지 않음
+    openpyxl로 값 컬럼만 정밀 업데이트.
+    - 수식 셀(=로 시작)은 절대 건드리지 않음
     - target_year 해당 행만 삭제 후 새 데이터 삽입
+    - Node.js spawn 환경에서도 권한 문제 없이 동작
     """
-    import xlwings as xw
+    import warnings
+    from copy import copy
 
-    app = xw.App(visible=False, add_book=False)
-    app.display_alerts = False
-    app.screen_updating = False
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb = load_workbook(target_path)
 
-    try:
-        wb  = app.books.open(target_path)
-        ws  = wb.sheets[sheet_name]
+    ws = wb[sheet_name]
 
-        # 1) target_year 해당 행 찾기 (역순 삭제)
-        last_row = ws.range('A1').current_region.last_cell.row
-        del_rows = []
-        for r in range(2, last_row + 1):
-            val = ws.range(r, date_col_idx + 1).value
-            if val is not None and str(val).startswith(str(target_year)):
-                del_rows.append(r)
+    # 1) 수식 컬럼 목록 파악 (2~5행 샘플링)
+    formula_cols = set()
+    for c in range(1, ws.max_column + 1):
+        for r in range(2, min(6, ws.max_row + 1)):
+            v = ws.cell(r, c).value
+            if isinstance(v, str) and v.startswith('='):
+                formula_cols.add(c)
+                break
+    log(f'  [{sheet_name}] 수식 보호 컬럼: {sorted(formula_cols)}')
 
-        log(f'  [{sheet_name}] {target_year}년 기존 {len(del_rows)}건 삭제')
-        for r in reversed(del_rows):
-            ws.range(f'{r}:{r}').delete()
+    # 2) target_year 행 역순 삭제
+    to_del = []
+    for row in ws.iter_rows(min_row=2):
+        val = row[date_col_idx].value
+        if val is not None and str(val).startswith(str(target_year)):
+            to_del.append(row[0].row)
+    for rn in reversed(to_del):
+        ws.delete_rows(rn)
+    log(f'  [{sheet_name}] {target_year}년 기존 {len(to_del)}건 삭제')
 
-        # 2) 신규 데이터 삽입 (target_year 행만, 값 컬럼만)
-        # 현재 마지막 행 아래에 추가
-        last_row = ws.range('A1').current_region.last_cell.row
-        if last_row < 1:
-            last_row = 1
+    # 3) 서식 복사용 기준행 (현재 마지막 데이터 행)
+    ref_row = ws.max_row if ws.max_row >= 2 else 2
 
-        insert_count = 0
-        for src in new_rows:
-            if len(src) <= date_col_idx:
+    # 4) 신규 데이터 삽입 (값 컬럼만, 수식 컬럼 건너뜀)
+    inserted = 0
+    for src in new_rows:
+        if len(src) <= date_col_idx:
+            continue
+        dv = src[date_col_idx]
+        if dv is None or not str(dv).startswith(str(target_year)):
+            continue
+
+        nr = ws.max_row + 1
+
+        # 기준행 서식 복사 (폰트·정렬·숫자포맷만 안전하게)
+        for c in range(1, min(val_col_count + 1, ws.max_column + 1)):
+            src_cell = ws.cell(ref_row, c)
+            dst_cell = ws.cell(nr, c)
+            try:
+                if src_cell.font:         dst_cell.font         = copy(src_cell.font)
+                if src_cell.alignment:    dst_cell.alignment    = copy(src_cell.alignment)
+                if src_cell.number_format:
+                    dst_cell.number_format = src_cell.number_format
+            except Exception:
+                pass
+
+        # 값만 쓰기 (수식 컬럼 제외)
+        for ci in range(val_col_count):
+            col_num = ci + 1
+            if col_num in formula_cols:
                 continue
-            dv = src[date_col_idx]
-            if dv is None or not str(dv).startswith(str(target_year)):
-                continue
-            last_row += 1
-            # 값 컬럼만 쓰기 (수식 컬럼은 Excel이 자동 채움)
-            for ci in range(val_col_count):
-                v = src[ci] if ci < len(src) else None
-                ws.range(last_row, ci + 1).value = v
-            insert_count += 1
+            ws.cell(nr, col_num).value = src[ci] if ci < len(src) else None
 
-        log(f'  [{sheet_name}] 새 데이터 {insert_count}건 삽입')
-        wb.save()
-        wb.close()
-    finally:
-        app.quit()
+        inserted += 1
+
+    log(f'  [{sheet_name}] 새 데이터 {inserted}건 삽입')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb.save(target_path)
+    wb.close()
 
 # ─── Selenium 브라우저 ───
 def build_driver():
