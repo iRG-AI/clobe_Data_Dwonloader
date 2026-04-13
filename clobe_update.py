@@ -129,7 +129,12 @@ def load_value_rows(src_path, sheet_index=0):
         warnings.simplefilter('ignore')
         wb   = load_workbook(src_path, data_only=True, read_only=True)
         ws   = wb.worksheets[sheet_index]
-        rows = [tuple(c.value for c in row) for row in ws.iter_rows(min_row=2)]
+        # ArrayFormula 객체는 None으로 변환 (값이 없는 셀)
+        def safe_val(v):
+            if ArrayFormula and isinstance(v, ArrayFormula):
+                return None
+            return v
+        rows = [tuple(safe_val(c.value) for c in row) for row in ws.iter_rows(min_row=2)]
         wb.close()
     return rows
 
@@ -144,7 +149,14 @@ def _update_sheet_in_wb(wb, sheet_name,
     - 서식(폰트/테두리/배경/정렬/숫자포맷) 기준행에서 완전 복사
     """
     from copy import copy
+    # ArrayFormula: openpyxl 버전마다 위치 다름 — 안전하게 동적 임포트
+try:
     from openpyxl.worksheet.formula import ArrayFormula
+except ImportError:
+    try:
+        from openpyxl.worksheet.array import ArrayFormula
+    except ImportError:
+        ArrayFormula = type('ArrayFormula', (), {})  # 구버전 대비 더미 클래스
 
     ws = wb[sheet_name]
 
