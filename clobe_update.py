@@ -14,6 +14,15 @@ import json, os, sys, time, glob, shutil, re, unicodedata
 from datetime import datetime
 from openpyxl import load_workbook
 
+# ArrayFormula: openpyxl 버전마다 위치 다름 — 안전하게 동적 임포트
+try:
+    from openpyxl.worksheet.formula import ArrayFormula
+except ImportError:
+    try:
+        from openpyxl.worksheet.array import ArrayFormula
+    except ImportError:
+        ArrayFormula = type('ArrayFormula', (), {})  # 구버전(3.0.x) 대비 더미 클래스
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -149,14 +158,6 @@ def _update_sheet_in_wb(wb, sheet_name,
     - 서식(폰트/테두리/배경/정렬/숫자포맷) 기준행에서 완전 복사
     """
     from copy import copy
-    # ArrayFormula: openpyxl 버전마다 위치 다름 — 안전하게 동적 임포트
-try:
-    from openpyxl.worksheet.formula import ArrayFormula
-except ImportError:
-    try:
-        from openpyxl.worksheet.array import ArrayFormula
-    except ImportError:
-        ArrayFormula = type('ArrayFormula', (), {})  # 구버전 대비 더미 클래스
 
     ws = wb[sheet_name]
 
