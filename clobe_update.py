@@ -199,11 +199,10 @@ def _update_sheet_in_wb(wb, sheet_name,
             except Exception:
                 pass
 
-        # 수식 컬럼: 기준행 수식 복사 (값 컬럼 범위 밖이어도)
+        # 수식 컬럼: 기준행 수식 그대로 복사 ([@컬럼명] 테이블 참조는 행 무관 동작)
         for c, fml in formula_cols.items():
             ws.cell(nr, c).value = fml
-        for c, afml in array_cols.items():
-            ws.cell(nr, c).value = ArrayFormula(afml.ref, afml.text)
+        # ArrayFormula는 복사 불가 — 빈 값 유지 (Excel 저장 후 자동 채워짐)
 
         # clobe 값 컬럼만 쓰기 (수식 컬럼은 위에서 이미 처리)
         for ci in range(val_col_count):
@@ -404,22 +403,21 @@ def update_card(apr_path, pur_path):
     apr_rows = load_value_rows(apr_path)
     pur_rows = load_value_rows(pur_path)
 
-    # 파일을 한 번만 열고 처리 후 한 번만 저장
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         wb = load_workbook(target)
 
-    log(f'  [사용내역-승인] 업데이트 시작...')
-    _update_sheet_in_wb(wb, '사용내역', apr_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
-
     if '매입내역' in wb.sheetnames:
+        # 매입내역 시트가 별도로 있는 경우 — 각각 처리
+        log(f'  [사용내역-승인] 업데이트 시작...')
+        _update_sheet_in_wb(wb, '사용내역', apr_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
         log(f'  [매입내역] 업데이트 시작...')
         _update_sheet_in_wb(wb, '매입내역', pur_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
-        log('  [매입내역] 별도 시트 삽입')
     else:
-        log(f'  [사용내역-매입] 업데이트 시작...')
-        _update_sheet_in_wb(wb, '사용내역', pur_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
-        log('  [매입내역] 사용내역 시트 합산')
+        # 사용내역 하나에 승인+매입 합산 — 합쳐서 한 번만 처리
+        combined = list(apr_rows) + list(pur_rows)
+        log(f'  [사용내역] 승인{len(apr_rows)}건 + 매입{len(pur_rows)}건 합산 업데이트 시작...')
+        _update_sheet_in_wb(wb, '사용내역', combined, CARD_VAL_COLS, 0, TARGET_YEAR)
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
