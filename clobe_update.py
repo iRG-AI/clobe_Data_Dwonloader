@@ -134,21 +134,14 @@ def load_value_rows(src_path, sheet_index=0):
     return rows
 
 # ─── openpyxl 기반 업데이트 (수식 컬럼 보호) ───
-def update_sheet_xlwings(target_path, sheet_name,
-                          new_rows, val_col_count,
-                          date_col_idx, target_year):
+def _update_sheet_in_wb(wb, sheet_name,
+                        new_rows, val_col_count,
+                        date_col_idx, target_year):
     """
-    openpyxl로 값 컬럼만 정밀 업데이트.
-    - 수식 셀(=로 시작)은 절대 건드리지 않음
-    - target_year 해당 행만 삭제 후 새 데이터 삽입
-    - Node.js spawn 환경에서도 권한 문제 없이 동작
+    이미 열린 wb 객체에서 시트만 업데이트.
+    파일 열기/저장은 호출자가 담당 (XML 오류 방지).
     """
-    import warnings
     from copy import copy
-
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        wb = load_workbook(target_path)
 
     ws = wb[sheet_name]
 
@@ -208,11 +201,6 @@ def update_sheet_xlwings(target_path, sheet_name,
         inserted += 1
 
     log(f'  [{sheet_name}] 새 데이터 {inserted}건 삽입')
-
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        wb.save(target_path)
-    wb.close()
 
 # ─── Selenium 브라우저 ───
 def build_driver():
@@ -368,6 +356,7 @@ TAX_VAL_COLS  = 14   # 발급일자~거래처 (COL1~14)
 CARD_VAL_COLS = 23   # 승인일시~메모 (COL1~23), COL24부터 수식
 
 def update_finance(txn_path, tax_path):
+    import warnings
     src = find_latest(FINANCE_DIR, '재무관리')
     log(f'\n재무관리 원본: {os.path.basename(src)}')
     target = archive_and_new(src, FINANCE_DIR, f'FY{YY} 재무관리')
@@ -375,28 +364,25 @@ def update_finance(txn_path, tax_path):
     txn_rows = load_value_rows(txn_path)
     tax_rows = load_value_rows(tax_path)
 
-    log(f'  [FY26-입출금] xlwings 업데이트 시작...')
-    update_sheet_xlwings(
-        target_path   = target,
-        sheet_name    = 'FY26-입출금',
-        new_rows      = txn_rows,
-        val_col_count = TXN_VAL_COLS,
-        date_col_idx  = 0,          # 거래일시 = COL1 (0-indexed)
-        target_year   = TARGET_YEAR
-    )
+    # 파일을 한 번만 열고 두 시트 모두 처리 후 한 번만 저장 (XML 오류 방지)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb = load_workbook(target)
 
-    log(f'  [세금계산서] xlwings 업데이트 시작...')
-    update_sheet_xlwings(
-        target_path   = target,
-        sheet_name    = '세금계산서',
-        new_rows      = tax_rows,
-        val_col_count = TAX_VAL_COLS,
-        date_col_idx  = 1,          # 작성일자 = COL2 (0-indexed)
-        target_year   = TARGET_YEAR
-    )
+    log(f'  [FY26-입출금] 업데이트 시작...')
+    _update_sheet_in_wb(wb, 'FY26-입출금', txn_rows, TXN_VAL_COLS, 0, TARGET_YEAR)
+
+    log(f'  [세금계산서] 업데이트 시작...')
+    _update_sheet_in_wb(wb, '세금계산서', tax_rows, TAX_VAL_COLS, 1, TARGET_YEAR)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb.save(target)
+    wb.close()
     log(f'  재무관리 저장 완료: {os.path.basename(target)} ✓')
 
 def update_card(apr_path, pur_path):
+    import warnings
     src = find_latest(FINANCE_DIR, '카드관리')
     log(f'\n카드관리 원본: {os.path.basename(src)}')
     target = archive_and_new(src, FINANCE_DIR, f'FY{YY} 카드관리')
@@ -404,37 +390,27 @@ def update_card(apr_path, pur_path):
     apr_rows = load_value_rows(apr_path)
     pur_rows = load_value_rows(pur_path)
 
-    log(f'  [사용내역-승인] xlwings 업데이트 시작...')
-    update_sheet_xlwings(
-        target_path   = target,
-        sheet_name    = '사용내역',
-        new_rows      = apr_rows,
-        val_col_count = CARD_VAL_COLS,
-        date_col_idx  = 0,          # 승인일시 = COL1 (0-indexed)
-        target_year   = TARGET_YEAR
-    )
+    # 파일을 한 번만 열고 처리 후 한 번만 저장
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb = load_workbook(target)
 
-    log(f'  [사용내역-매입] xlwings 업데이트 시작...')
-    if '매입내역' in _get_sheet_names(target):
-        update_sheet_xlwings(
-            target_path   = target,
-            sheet_name    = '매입내역',
-            new_rows      = pur_rows,
-            val_col_count = CARD_VAL_COLS,
-            date_col_idx  = 0,
-            target_year   = TARGET_YEAR
-        )
+    log(f'  [사용내역-승인] 업데이트 시작...')
+    _update_sheet_in_wb(wb, '사용내역', apr_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
+
+    if '매입내역' in wb.sheetnames:
+        log(f'  [매입내역] 업데이트 시작...')
+        _update_sheet_in_wb(wb, '매입내역', pur_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
         log('  [매입내역] 별도 시트 삽입')
     else:
-        update_sheet_xlwings(
-            target_path   = target,
-            sheet_name    = '사용내역',
-            new_rows      = pur_rows,
-            val_col_count = CARD_VAL_COLS,
-            date_col_idx  = 0,
-            target_year   = TARGET_YEAR
-        )
+        log(f'  [사용내역-매입] 업데이트 시작...')
+        _update_sheet_in_wb(wb, '사용내역', pur_rows, CARD_VAL_COLS, 0, TARGET_YEAR)
         log('  [매입내역] 사용내역 시트 합산')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        wb.save(target)
+    wb.close()
     log(f'  카드관리 저장 완료: {os.path.basename(target)} ✓')
 
 def _get_sheet_names(path):
