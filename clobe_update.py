@@ -139,21 +139,28 @@ def _update_sheet_in_wb(wb, sheet_name,
                         date_col_idx, target_year):
     """
     이미 열린 wb 객체에서 시트만 업데이트.
-    파일 열기/저장은 호출자가 담당 (XML 오류 방지).
+    - clobe 값 컬럼(val_col_count개)만 쓰고
+    - 수식 컬럼은 기준행의 수식을 복사 (자동 참조 수식 유지)
+    - 서식(폰트/테두리/배경/정렬/숫자포맷) 기준행에서 완전 복사
     """
     from copy import copy
+    from openpyxl.worksheet.formula import ArrayFormula
 
     ws = wb[sheet_name]
 
-    # 1) 수식 컬럼 목록 파악 (2~5행 샘플링)
-    formula_cols = set()
+    # 1) 수식/ArrayFormula 컬럼 목록 파악 (2~5행 샘플링)
+    formula_cols  = {}  # col_num -> formula_str
+    array_cols    = {}  # col_num -> ArrayFormula obj
     for c in range(1, ws.max_column + 1):
         for r in range(2, min(6, ws.max_row + 1)):
             v = ws.cell(r, c).value
             if isinstance(v, str) and v.startswith('='):
-                formula_cols.add(c)
+                formula_cols[c] = v
                 break
-    log(f'  [{sheet_name}] 수식 보호 컬럼: {sorted(formula_cols)}')
+            elif isinstance(v, ArrayFormula):
+                array_cols[c] = v
+                break
+    log(f'  [{sheet_name}] 수식 컬럼: {sorted(formula_cols.keys())}')
 
     # 2) target_year 행 역순 삭제
     to_del = []
@@ -165,10 +172,10 @@ def _update_sheet_in_wb(wb, sheet_name,
         ws.delete_rows(rn)
     log(f'  [{sheet_name}] {target_year}년 기존 {len(to_del)}건 삭제')
 
-    # 3) 서식 복사용 기준행 (현재 마지막 데이터 행)
+    # 3) 서식+수식 복사 기준행
     ref_row = ws.max_row if ws.max_row >= 2 else 2
 
-    # 4) 신규 데이터 삽입 (값 컬럼만, 수식 컬럼 건너뜀)
+    # 4) 신규 데이터 삽입
     inserted = 0
     for src in new_rows:
         if len(src) <= date_col_idx:
@@ -179,23 +186,30 @@ def _update_sheet_in_wb(wb, sheet_name,
 
         nr = ws.max_row + 1
 
-        # 기준행 서식 복사 (폰트·정렬·숫자포맷만 안전하게)
-        for c in range(1, min(val_col_count + 1, ws.max_column + 1)):
-            src_cell = ws.cell(ref_row, c)
+        # 전체 컬럼 서식 복사 (테두리·배경·폰트·정렬·숫자포맷)
+        for c in range(1, ws.max_column + 1):
+            ref_cell = ws.cell(ref_row, c)
             dst_cell = ws.cell(nr, c)
             try:
-                if src_cell.font:         dst_cell.font         = copy(src_cell.font)
-                if src_cell.alignment:    dst_cell.alignment    = copy(src_cell.alignment)
-                if src_cell.number_format:
-                    dst_cell.number_format = src_cell.number_format
+                if ref_cell.font:          dst_cell.font          = copy(ref_cell.font)
+                if ref_cell.border:        dst_cell.border        = copy(ref_cell.border)
+                if ref_cell.fill:          dst_cell.fill          = copy(ref_cell.fill)
+                if ref_cell.alignment:     dst_cell.alignment     = copy(ref_cell.alignment)
+                if ref_cell.number_format: dst_cell.number_format = ref_cell.number_format
             except Exception:
                 pass
 
-        # 값만 쓰기 (수식 컬럼 제외)
+        # 수식 컬럼: 기준행 수식 복사 (값 컬럼 범위 밖이어도)
+        for c, fml in formula_cols.items():
+            ws.cell(nr, c).value = fml
+        for c, afml in array_cols.items():
+            ws.cell(nr, c).value = ArrayFormula(afml.ref, afml.text)
+
+        # clobe 값 컬럼만 쓰기 (수식 컬럼은 위에서 이미 처리)
         for ci in range(val_col_count):
             col_num = ci + 1
-            if col_num in formula_cols:
-                continue
+            if col_num in formula_cols or col_num in array_cols:
+                continue  # 수식 컬럼 보호
             ws.cell(nr, col_num).value = src[ci] if ci < len(src) else None
 
         inserted += 1
